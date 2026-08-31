@@ -3,6 +3,10 @@
 .DS_Store
 .idea/
 
+# Node / Vite
+node_modules/
+dist/
+
 # Env
 .env
 
