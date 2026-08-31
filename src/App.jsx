@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { loadPdf, invertPdf } from './pdf.js';
+import { loadPdf, invertPdf, slicePdf } from './pdf.js';
 
 const STATUS = {
   IDLE: 'idle',
@@ -87,7 +87,18 @@ export default function App() {
     return { from, to };
   };
 
-  const onProcess = async () => {
+  const downloadPdf = (bytes, suffix) => {
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName.replace(/\.pdf$/i, '') + suffix + '.pdf';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Инверсия цвета + нарезка диапазона (с растрированием).
+  const onInvert = async () => {
     setError('');
     const range = resolveRange();
     if (typeof range === 'string') {
@@ -105,18 +116,32 @@ export default function App() {
         end: range.to,
         onProgress: (done, total) => setProgress({ done, total }),
       });
-
-      const blob = new Blob([bytes], { type: 'application/pdf' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = fileName.replace(/\.pdf$/i, '') + '-inverted.pdf';
-      a.click();
-      URL.revokeObjectURL(url);
-
+      downloadPdf(bytes, '-inverted');
       setStatus(STATUS.DONE);
     } catch {
       setError('Ошибка при обработке PDF. Попробуйте другой файл или меньший диапазон страниц.');
+      setStatus(STATUS.LOADED);
+    }
+  };
+
+  // Только нарезка диапазона, без инверсии и без потери качества.
+  const onSlice = async () => {
+    setError('');
+    const range = resolveRange();
+    if (typeof range === 'string') {
+      setError(range);
+      return;
+    }
+
+    setStatus(STATUS.PROCESSING);
+    setProgress({ done: 0, total: range.to - range.from + 1 });
+
+    try {
+      const bytes = await slicePdf(buffer.slice(0), { start: range.from, end: range.to });
+      downloadPdf(bytes, `-pages-${range.from}-${range.to}`);
+      setStatus(STATUS.DONE);
+    } catch {
+      setError('Ошибка при нарезке PDF. Проверьте файл и диапазон страниц.');
       setStatus(STATUS.LOADED);
     }
   };
@@ -128,8 +153,8 @@ export default function App() {
     <main className="app">
       <h1>PDF Inverter</h1>
       <p className="subtitle">
-        Инвертирует цвета PDF (белое ↔ чёрное) и вырезает диапазон страниц — прямо в браузере,
-        файл никуда не загружается.
+        Инвертирует цвета PDF (белое ↔ чёрное) или просто вырезает диапазон страниц — прямо
+        в браузере, файл никуда не загружается. Нарезка без инверсии сохраняет качество исходника.
       </p>
 
       <div
@@ -185,8 +210,11 @@ export default function App() {
           </div>
 
           <div className="actions">
-            <button onClick={onProcess} disabled={busy}>
+            <button onClick={onInvert} disabled={busy}>
               {busy ? 'Обработка…' : 'Инвертировать и скачать'}
+            </button>
+            <button className="secondary" onClick={onSlice} disabled={busy}>
+              Только нарезать (без инверсии)
             </button>
             <button className="secondary" onClick={reset} disabled={busy}>
               Сбросить
